@@ -12,14 +12,83 @@ It requires python 3.6 or above, as well as the modules:
 """
 
 
-import Clustering as clus
+import clustering as clus
 
 # Libraries
 import numpy as np
-import Processing as proc
-import Visualization as vis
+import processing as proc
+import visualization as vis
 from nilearn.input_data import NiftiMasker
 from nilearn.masking import apply_mask
+from os.path import exists
+from pathlib import Path
+
+INFOMAP = 'infomap'
+NOT_INFOMAP = 'not_infomap'
+
+VALID_ALGORITHMS = (
+    INFOMAP,
+    NOT_INFOMAP
+)
+
+
+PROC_DOUBLE = 'double'
+PROC_THRESHOLD = 'thr'
+PROC_RSS = 'rss'
+PROC_WINDOW = 'window'
+
+VALID_PROCESSING_ARGS = (
+    PROC_DOUBLE,
+    PROC_THRESHOLD,
+    PROC_RSS,
+    PROC_WINDOW
+)
+
+
+def validate_data_file(data_file: str) -> None:
+    if not isinstance(data_file, str):
+        raise ValueError('data_file should be str.')
+
+    if not exists(data_file):
+        raise ValueError('data_file does not exist.')
+
+    if not Path(data_file).is_file():
+        raise ValueError('data_file is not a file.')
+
+
+def preprocess_data(
+        data,
+        processing,
+        window_size,
+        near,
+        thr,
+        contrast,
+        task,
+        TR
+):
+
+    correlation_map = np.nan_to_num(np.corrcoef(data))
+    indexes = range(correlation_map.shape[0])
+
+    if processing not in VALID_PROCESSING_ARGS:
+        return correlation_map, indexes
+
+    correlation_map, indexes = proc.preprocess(
+        corr_map=correlation_map,
+        analysis=processing,
+        data=data,
+        window_size=window_size,
+        near=near,
+        thr=thr,
+        contrast=contrast,
+        task=task,
+        TR=TR,
+    )
+
+    return correlation_map, indexes
+
+
+
 
 
 def clustintime(
@@ -33,7 +102,7 @@ def clustintime(
     thr=95,
     contrast=1,
     TR=0.5,
-    algorithm="infomap",
+    algorithm=INFOMAP,
     thr_infomap=90,
     n_clusters=7,
     save_maps=False,
@@ -78,7 +147,7 @@ def clustintime(
         TR of the data.
         The default is 0.5.
     algorithm : str, optional
-        Desired clustering algorithm for the analysis, the options are `infomap`nd `KMeans`.
+        Desired clustering algorithm for the analysis, the options are `infomap` and `KMeans`.
         The default is "infomap".
     thr_infomap : int, optional
         Threshold percentile to binarize the matrix in the infomap algorithm.
@@ -101,63 +170,45 @@ def clustintime(
 
     """
 
-    masker = NiftiMasker(mask_img=mask_file)
-    masker.fit(data_file)
+    validate_data_file(data_file)
 
-    print("Applying mask ...")
-    print(" ")
+    NiftiMasker(mask_img=mask_file).fit(data_file)
+    data = apply_mask(data_file, mask_file)
 
-    data = apply_mask(data_file, mask_file)  # apply mask to the fitted signal
+    task = {idx: np.loadtxt(filename) for idx, filename in enumerate(timings_file)}
 
-    print("Mask applied!")
-    # Create data
-    if timings:
-        # Load timings
-        # 1D files are a txt file with the times in which the events occur. They are divided by TR
-        task = {}
-        for i in range(len(timings_file)):
-            task[i] = np.loadtxt(timings_file[i])
+    correlation_map, indexes = preprocess_data(
+        data=data,
+        processing=processing,
+        window_size=window_size,
+        near=near,
+        thr=thr,
+        contrast=contrast,
+        task=task,
+        TR=TR
+    )
 
-    else:
-        task = []
 
-    corr_map = np.nan_to_num(np.corrcoef(data))
-    nscans = corr_map.shape[0]
-    indexes = range(corr_map.shape[0])
 
-    if processing is not None:
-        corr_map, indexes = proc.preprocess(
-            corr_map=corr_map,
-            analysis=processing,
-            data=data,
-            window_size=window_size,
-            near=near,
-            thr=thr,
-            contrast=contrast,
-            task=task,
-            TR=TR,
-        )
 
     if algorithm == "infomap":
-        corr_map_2 = corr_map.copy()
-        corr_map, labels = clus.Info_Map(
-            corr_map,
+        # corr_map_2 = correlation_map.copy()
+        correlation_map, labels = clus.Info_Map(
+            correlation_map,
             indexes,
             thr_infomap,
-            nscans=nscans,
+            nscans=correlation_map.shape[0],
             task=task,
             TR=TR,
             saving_dir=saving_dir,
             prefix=prefix,
         )
-        vis.plot_two_matrixes(
-            corr_map_2, corr_map, "Original correlation map", "Binary correlation map"
-        )
+        # vis.plot_two_matrixes(corr_map_2, correlation_map, "Original correlation map", "Binary correlation map")
     elif algorithm == "KMeans":
         labels = clus.K_Means(
-            corr_map=corr_map,
+            corr_map=correlation_map,
             indexes=indexes,
-            nscans=nscans,
+            nscans=correlation_map.shape[0],
             n_clusters=n_clusters,
             TR=TR,
             task=task,
@@ -167,4 +218,11 @@ def clustintime(
 
     if save_maps:
         clus.generate_maps(labels, saving_dir, data_file, mask_file, prefix)
-    vis.Dyn(corr_map, labels, output_file=f"{saving_dir}/dyneusr_{algorithm}.html")
+    vis.Dyn(correlation_map, labels, output_file=f"{saving_dir}/dyneusr_{algorithm}.html")
+
+
+if __name__ == '__main__':
+    clustintime(
+        data_file='../samples/S41vol.pySPFM.LARS.STC.beta_99.GROUPS.nii.gz',
+        mask_file='../samples/S41vol.mask.nii.gz'
+    )

@@ -10,7 +10,7 @@ import networkx as nx  # creation, manipulation and study of the structure, dyna
 import nibabel as nib
 import numpy as np
 import pandas as pd
-import Visualization as vis
+import visualization as vis
 from nilearn.input_data import NiftiMasker
 from sklearn.cluster import KMeans
 
@@ -184,19 +184,16 @@ def Info_Map(corr_map, indexes, thr, nscans, task=[], TR=0.5, saving_dir=".", pr
 
     corr_map = pd.DataFrame(corr_map)
     corr_map[corr_map < np.percentile(corr_map, thr)] = 0
-    corr_smooth_binary = corr_map != 0  # Find all the voxels with correlation
-    corr_smooth_binary = np.matrix(corr_smooth_binary)
+    corr_smooth_binary = np.matrix(corr_map != 0)  # Find all the voxels with correlation
 
-    G = nx.from_numpy_matrix(corr_smooth_binary)  # Again the binary
-    coms = findCommunities(G)  # Clustering
+    communities = findCommunities(nx.from_numpy_matrix(corr_smooth_binary))
 
-    coms_labels = np.zeros(corr_map.shape[0])
+    coms_labels = np.zeros(corr_smooth_binary.shape[0])
 
-    for ii in coms:
-        coms_labels[ii] = coms[ii]
+    for idx, community in communities.values():
+        coms_labels[idx] = community
 
-    labels = np.transpose(pd.DataFrame([coms_labels, indexes]))
-    labels = labels.set_index(1)
+    labels = np.transpose(pd.DataFrame([coms_labels, indexes])).set_index(1)
 
     final_labels = np.zeros(nscans)
 
